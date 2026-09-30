@@ -1,0 +1,1554 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>✨ 一括アニメーションジェネレーター</title>
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pako/2.1.0/pako.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/upng-js@2.1.0/UPNG.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    
+    <style>
+        :root {
+            --bg-color: #f8f9fa;
+            --sidebar-bg: #ffffff;
+            --text-color: #333333;
+            --primary-color: #FF4B4B;
+            --primary-hover: #FF3333;
+            --border-color: #e0e0e0;
+        }
+        body {
+            margin: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            display: flex;
+            min-height: 100vh;
+            color: var(--text-color);
+            background-color: var(--bg-color);
+        }
+        
+        /* レイアウト */
+        .sidebar {
+            width: 40%;
+            background-color: var(--sidebar-bg);
+            padding: 1rem;
+            box-sizing: border-box;
+            flex-shrink: 0;
+            overflow-y: auto;
+            border-right: 1px solid var(--border-color);
+            box-shadow: 2px 0 5px rgba(0,0,0,0.05);
+            height: 100vh;
+        }
+        .main-content {
+            width: 60%;
+            padding: 1rem;
+            box-sizing: border-box;
+            overflow-y: auto;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        @media (max-width: 800px) {
+            body { flex-direction: column; }
+            .sidebar { width: 100%; height: auto; border-right: none; border-bottom: 1px solid var(--border-color); }
+            .main-content { width: 100%; height: auto; }
+        }
+
+        /* UIコンポーネント */
+        h1, h2, h3 { margin-top: 0; color: #111; }
+        h1 { font-size: 1.3rem; border-bottom: 2px solid var(--primary-color); padding-bottom: 0.3rem; display: inline-block; margin-bottom: 0; }
+        h2 { font-size: 1.0rem; margin-top: 0.3rem; margin-bottom: 0.4rem; border-bottom: 1px solid var(--border-color); padding-bottom: 0.2rem; color: #444; }
+        
+        .form-group { margin-bottom: 0.6rem; }
+        label { display: block; font-weight: bold; margin-bottom: 0.2rem; font-size: 0.85rem; }
+        .help-text { font-size: 0.7rem; color: #777; margin-top: 0.1rem; }
+        
+        select, input[type="number"], input[type="range"] {
+            width: 100%; padding: 0.4rem; border: 1px solid #ccc; border-radius: 6px; box-sizing: border-box; font-size: 0.9rem;
+        }
+        
+        button {
+            background-color: var(--primary-color); color: white; border: none; padding: 0.6rem;
+            border-radius: 6px; cursor: pointer; font-size: 0.95rem; width: 100%; font-weight: bold;
+            transition: 0.2s;
+        }
+        button:hover { background-color: var(--primary-hover); }
+        button:disabled { background-color: #ffb3b3; cursor: not-allowed; opacity: 0.7; }
+        
+        .btn-secondary { background-color: #2196F3; }
+        .btn-secondary:hover { background-color: #1976D2; }
+        
+        .btn-third { background-color: #17a2b8; color: white; border: none; padding: 0.6rem; border-radius: 6px; cursor: pointer; font-size: 0.95rem; width: 100%; font-weight: bold; transition: 0.2s; }
+        .btn-third:hover { background-color: #138496; }
+        .btn-third:disabled { background-color: #a8d5e2; cursor: not-allowed; opacity: 0.7; }
+
+        .btn-play { background-color: #4CAF50; display: flex; align-items: center; justify-content: center; gap: 8px;}
+        .btn-play:hover { background-color: #43A047; }
+        
+        .btn-danger { background-color: #dc3545; color: white; border: none; padding: 0.5rem 1rem; border-radius: 6px; cursor: pointer; font-size: 0.9rem; font-weight: bold; transition: 0.2s; display: flex; align-items: center; gap: 4px; }
+        .btn-danger:hover { background-color: #c82333; }
+        .btn-danger:disabled { background-color: #e2e3e5; color: #6c757d; cursor: not-allowed; }
+
+        .drop-zone {
+            border: 2px dashed #999; border-radius: 8px; padding: 1rem;
+            text-align: center; background-color: #f9f9f9; cursor: pointer;
+            transition: all 0.2s ease; margin-bottom: 0.8rem;
+        }
+        .drop-zone:hover, .drop-zone.dragover { background-color: #e3f2fd; border-color: #2196F3; }
+        .drop-zone input[type="file"] { display: none; }
+
+        .box-panel { background-color: #fcfcfc; border: 1px solid #e0e0e0; padding: 0.8rem; border-radius: 8px; margin-bottom: 0.8rem; }
+
+        /* 設定項目の横並び */
+        .setting-row { display: grid; gap: 10px; align-items: start; }
+        .setting-row.two-col { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        .setting-row.three-col { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+
+        .setting-row .form-group { min-width: 0; }
+
+        @media (max-width: 900px) {
+            .setting-row.three-col { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+        }
+
+        @media (max-width: 600px) {
+            .setting-row.two-col,
+            .setting-row.three-col { grid-template-columns: 1fr; }
+        }
+
+        /* 背景色ラジオボタン */
+        .bg-radio-group {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            background: #fff;
+            padding: 6px 12px;
+            border: 1px solid #ccc;
+            border-radius: 6px;
+        }
+        .bg-radio-group span { font-size: 0.85rem; color: #555; font-weight: bold; }
+        .bg-radio-group label { margin: 0; font-weight: normal; font-size: 0.85rem; cursor: pointer; display: flex; align-items: center; gap: 4px; }
+        .bg-radio-group input[type="radio"] { margin: 0; cursor: pointer; width: auto; }
+
+        /* プレビューグリッド */
+        .preview-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+            gap: 15px;
+            align-content: start;
+        }
+        .preview-item {
+            background: #fff;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            padding: 10px;
+            text-align: center;
+            position: relative;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: space-between;
+            transition: all 0.2s ease;
+        }
+        
+        .preview-item.over-limit {
+            background-color: #ffebeb;
+            border-color: #ff4b4b;
+        }
+        .preview-item.over-limit .size-info {
+            color: #ff4b4b;
+            font-weight: bold;
+        }
+
+        .preview-item canvas {
+            max-width: 100%;
+            height: auto;
+            border: 1px solid #eee;
+            border-radius: 4px;
+            transition: background 0.3s ease;
+        }
+
+        .bg-mode-checker .preview-item canvas {
+            background-image: 
+                linear-gradient(45deg, #e6e6e6 25%, transparent 25%, transparent 75%, #e6e6e6 75%, #e6e6e6),
+                linear-gradient(45deg, #e6e6e6 25%, transparent 25%, transparent 75%, #e6e6e6 75%, #e6e6e6);
+            background-size: 16px 16px;
+            background-position: 0 0, 8px 8px;
+            background-color: transparent;
+        }
+        .bg-mode-white .preview-item canvas { background-image: none; background-color: #ffffff; }
+        .bg-mode-black .preview-item canvas { background-image: none; background-color: #222222; }
+        .bg-mode-lightblue .preview-item canvas { background-image: none; background-color: #b3e5fc; }
+
+        .preview-item p {
+            font-size: 0.75rem; color: #555; word-break: break-all; margin: 8px 0 0 0;
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis; width: 100%;
+        }
+
+        .size-info { margin-top: 4px; font-size: 0.75rem; text-align: center; color: #666; }
+
+        .btn-optimize {
+            background-color: #ff9800; color: white; border: none; border-radius: 4px;
+            padding: 0.35rem; font-size: 0.75rem; cursor: pointer; width: 100%;
+            margin-top: 4px; font-weight: bold; transition: 0.2s;
+        }
+        .btn-optimize:hover { background-color: #e68a00; }
+        .btn-optimize:disabled { background-color: #ffcc80; cursor: not-allowed; }
+
+        .btn-dl-single {
+            background-color: #28a745; color: white; border: none; border-radius: 4px;
+            padding: 0.4rem; font-size: 0.75rem; cursor: pointer; width: 100%;
+            margin-top: 6px; font-weight: bold; transition: 0.2s;
+        }
+        .btn-dl-single:hover { background-color: #218838; }
+        .btn-dl-single:disabled { background-color: #94d3a2; cursor: not-allowed; }
+
+        .btn-calc-single {
+            background-color: #9C27B0; color: white; border: none; border-radius: 4px;
+            padding: 0.4rem; font-size: 0.75rem; cursor: pointer; width: 100%;
+            margin-top: 6px; font-weight: bold; transition: 0.2s;
+        }
+        .btn-calc-single:hover { background-color: #7B1FA2; }
+        .btn-calc-single:disabled { background-color: #ce93d8; cursor: not-allowed; }
+
+        .btn-remove {
+            position: absolute; top: 5px; right: 5px; background: rgba(0,0,0,0.5); color: #fff;
+            border: none; border-radius: 50%; width: 24px; height: 24px; font-size: 12px;
+            cursor: pointer; padding: 0; display: flex; align-items: center; justify-content: center;
+        }
+        .btn-remove:hover { background: red; }
+
+        .status-msg {
+            display: none;
+            position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            background: #ffffff; padding: 2rem 3rem; border-radius: 12px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.2), 0 0 0 100vmax rgba(0,0,0,0.4); 
+            z-index: 9999; min-width: 320px; max-width: 80%; text-align: center;
+            font-weight: bold; font-size: 1rem; color: #333;
+        }
+        .status-msg.active { display: block; }
+        
+        .progress-wrap { margin-top: 15px; width: 100%; }
+        .progress-track { width: 100%; height: 12px; background: #e9ecef; border-radius: 999px; overflow: hidden; }
+        .progress-bar { width: 0%; height: 100%; background: #2196F3; border-radius: 999px; transition: width 0.15s ease; }
+        .progress-detail { margin-top: 8px; font-size: 0.85rem; font-weight: normal; color: #555; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        
+        /* 16色まで減らしても容量オーバーの時のアラートメッセージ用 */
+        .limit-alert {
+            font-size: 0.7rem;
+            color: #d32f2f;
+            margin-top: 6px;
+            font-weight: bold;
+            display: none;
+            line-height: 1.3;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="sidebar">
+        <h2>1. 画像を追加</h2>
+        <div class="setting-row two-col" style="margin-bottom: 0.8rem;">
+            <div class="box-panel" style="margin-bottom: 0; display: flex; flex-direction: column; justify-content: center;">
+                <div class="form-group" style="margin-bottom: 0;">
+                    <label style="margin-bottom: 0.5rem;">画像の種類 (容量制限の設定)</label>
+                    <div style="display: flex; flex-direction: column; gap: 8px;">
+                        <label style="font-weight: normal; cursor: pointer; display: flex; align-items: center; gap: 4px;">
+                            <input type="radio" name="imageType" value="emoji" checked> 絵文字 (300KB以下)
+                        </label>
+                        <label style="font-weight: normal; cursor: pointer; display: flex; align-items: center; gap: 4px;">
+                            <input type="radio" name="imageType" value="other"> それ以外 (1MB以下)
+                        </label>
+                    </div>
+                    <div class="help-text" style="margin-top: 8px;">※制限を超えると赤く警告され、「最適化」が可能になります。</div>
+                </div>
+            </div>
+
+            <div class="drop-zone" id="mainDropZone" style="margin-bottom: 0; display: flex; flex-direction: column; justify-content: center; align-items: center; padding: 1rem 0.5rem;">
+                <div style="font-size: 1.8rem; margin-bottom: 0.3rem;">📂</div>
+                <div style="font-size: 0.85rem; font-weight:bold; color:#444; line-height: 1.4;">ここに複数のPNGを<br>ドロップ</div>
+                <div class="help-text" style="margin-top: 6px;">またはクリックで選択</div>
+                <input type="file" id="fileUpload" accept="image/png" multiple>
+            </div>
+        </div>
+
+        <h2>2. アニメーション設定</h2>
+        <div class="box-panel">
+            <div class="setting-row two-col">
+                <div class="form-group">
+                    <label>メインの動き</label>
+                    <select id="animType" style="margin-bottom: 10px;">
+                        <option>ゆらゆら（上部支点）</option>
+                        <option>ゆらゆら（中部支点）</option>
+                        <option>ゆらゆら（下部支点）</option>
+                        <option>横揺れ</option>
+                        <option>縦揺れ</option>
+                        <option>拡大⇔縮小</option>
+                        <option>膨らんでしぼむ</option>
+                        <option>拡大で登場</option>
+                        <option>ぐるぐるで登場（回転＋拡大）</option>
+                        <option>その場で回転（時計回り）</option>
+                        <option>その場で回転（反時計回り）</option>
+                        <option>ふんわり消える（フェードアウト）</option>
+                        <option>ふんわり現れる（フェードイン）</option>
+                        <option>上から登場</option>
+                        <option>上から落ちてきて着地</option>
+                        <option>下から登場</option>
+                        <option>右から左へ流れる</option>
+                        <option>左から右へ流れる</option>
+                        <option>右からすべって登場</option>
+                        <option>左からすべって登場</option>
+                        <option>ガタガタ（激しい震え）</option>
+                        <option>震えてピタッと止まる</option>
+                        <option>ペコリ（左に倒れる）</option>
+                        <option>ペコリ（右に倒れる）</option>
+                        <option>チカチカ（点滅）</option>
+                        <option>ゆっくり伸び縮み</option>
+                        <option>激しく伸び縮み</option>
+                        <option>くるっと反転（横）</option>
+                        <option>くるっと反転（縦）</option>
+                        <option>ぴょんぴょん（ジャンプ＋伸縮）</option>
+                        <option>ぽよんっ（バネのような登場）</option>
+                    </select>
+                    
+                    <label style="font-size: 0.8rem; color: #555;">メインの変化の大きさ</label>
+                    <div style="display: flex; gap: 8px; align-items: center;">
+                        <button type="button" id="btnAmpMinus1" style="width: 32px; height: 32px; padding: 0; flex-shrink: 0; font-size: 1.1rem; line-height: 1;">-</button>
+                        <input type="range" id="amplitude1" min="1" max="100" value="10">
+                        <button type="button" id="btnAmpPlus1" style="width: 32px; height: 32px; padding: 0; flex-shrink: 0; font-size: 1.1rem; line-height: 1;">+</button>
+                        <span id="valAmp1" style="font-family: monospace; font-size: 0.9rem; min-width: 25px; text-align: center;">10</span>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>サブの動き（重ね合わせ）</label>
+                    <select id="animType2" style="margin-bottom: 10px;">
+                        <option value="none">なし（組み合わせない）</option>
+                        <option>ゆらゆら（上部支点）</option>
+                        <option>ゆらゆら（中部支点）</option>
+                        <option>ゆらゆら（下部支点）</option>
+                        <option>横揺れ</option>
+                        <option>縦揺れ</option>
+                        <option>拡大⇔縮小</option>
+                        <option>膨らんでしぼむ</option>
+                        <option>拡大で登場</option>
+                        <option>ぐるぐるで登場（回転＋拡大）</option>
+                        <option>その場で回転（時計回り）</option>
+                        <option>その場で回転（反時計回り）</option>
+                        <option>ふんわり消える（フェードアウト）</option>
+                        <option>ふんわり現れる（フェードイン）</option>
+                        <option>上から登場</option>
+                        <option>上から落ちてきて着地</option>
+                        <option>下から登場</option>
+                        <option>右から左へ流れる</option>
+                        <option>左から右へ流れる</option>
+                        <option>右からすべって登場</option>
+                        <option>左からすべって登場</option>
+                        <option>ガタガタ（激しい震え）</option>
+                        <option>震えてピタッと止まる</option>
+                        <option>ペコリ（左に倒れる）</option>
+                        <option>ペコリ（右に倒れる）</option>
+                        <option>チカチカ（点滅）</option>
+                        <option>ゆっくり伸び縮み</option>
+                        <option>激しく伸び縮み</option>
+                        <option>くるっと反転（横）</option>
+                        <option>くるっと反転（縦）</option>
+                        <option>ぴょんぴょん（ジャンプ＋伸縮）</option>
+                        <option>ぽよんっ（バネのような登場）</option>
+                    </select>
+
+                    <label style="font-size: 0.8rem; color: #555;">サブの変化の大きさ</label>
+                    <div style="display: flex; gap: 8px; align-items: center;">
+                        <button type="button" id="btnAmpMinus2" style="width: 32px; height: 32px; padding: 0; flex-shrink: 0; font-size: 1.1rem; line-height: 1;">-</button>
+                        <input type="range" id="amplitude2" min="1" max="100" value="10">
+                        <button type="button" id="btnAmpPlus2" style="width: 32px; height: 32px; padding: 0; flex-shrink: 0; font-size: 1.1rem; line-height: 1;">+</button>
+                        <span id="valAmp2" style="font-family: monospace; font-size: 0.9rem; min-width: 25px; text-align: center;">10</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="setting-row three-col" style="margin-top: 15px;">
+                <div class="form-group">
+                    <label>フレームレート (FPS)</label>
+                    <input type="number" id="fps" min="5" max="20" value="10">
+                    <div class="help-text">※高いほど滑らかですが容量が大きくなります</div>
+                </div>
+
+                <div class="form-group">
+                    <label>秒数</label>
+                    <select id="durationSec">
+                        <option value="1" selected>1秒</option>
+                        <option value="1.5">1.5秒</option>
+                        <option value="2">2秒</option>
+                        <option value="3">3秒</option>
+                        <option value="4">4秒</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label>ループ回数</label>
+                    <select id="loopCount">
+                        <option value="1">1回</option>
+                        <option value="2">2回</option>
+                        <option value="3">3回</option>
+                        <option value="4" selected>4回</option>
+                    </select>
+                    <div class="help-text">※1つのアニメーション中に何度動きを繰り返すか</div>
+                </div>
+            </div>
+        </div>
+
+        <h2>3. 容量チェックと最適化</h2>
+        <div class="box-panel">
+            <div class="setting-row two-col">
+                <button id="btnCalculateSize" class="btn-secondary" style="background-color: #9C27B0;">📊 容量を一括計算</button>
+                <button id="btnOptimizeAll" class="btn-secondary" style="background-color: #ff9800;" disabled>⚡ 容量オーバーを一括最適化</button>
+            </div>
+            <div class="help-text" style="margin-top: 5px;">※設定を変更した後は、再度計算ボタンを押してください。</div>
+        </div>
+
+        <h2>4. 一括出力</h2>
+        <div class="setting-row two-col">
+            <button id="btnDownloadAll" class="btn-secondary" disabled>📦 すべてのAPNGをZIPで保存</button>
+            <button id="btnDownloadAllIndividual" class="btn-third" disabled>💾 すべてのAPNGを個別に保存</button>
+        </div>
+    </div>
+
+    <div class="main-content">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; flex-wrap: wrap; gap: 10px;">
+            <div style="display: flex; align-items: center; gap: 15px; flex-wrap: wrap;">
+                <h1>✨ プレビュー一覧</h1>
+                
+                <div class="bg-radio-group">
+                    <span>背景:</span>
+                    <label><input type="radio" name="bgColor" value="checker" checked> 格子</label>
+                    <label><input type="radio" name="bgColor" value="white"> 白</label>
+                    <label><input type="radio" name="bgColor" value="black"> 黒</label>
+                    <label><input type="radio" name="bgColor" value="lightblue"> 水色</label>
+                </div>
+		 <div style="display: flex; align-items: center; gap: 8px; background: #fff; padding: 4px 12px; border: 1px solid #ccc; border-radius: 6px; margin: 0;">
+                    <span style="font-size: 0.85rem; font-weight: bold; color: #444; white-space: nowrap;">白フチの太さ:</span>
+                    <button type="button" id="btnBorderMinus" style="width: 28px; height: 28px; padding: 0; flex-shrink: 0; font-size: 1.1rem; line-height: 1; border-radius: 4px; background: #eee; color: #333; cursor: pointer;">-</button>
+                    <input type="range" id="borderWidth" min="0" max="10" value="0" style="width: 80px; margin: 0; padding: 0; border: none;">
+                    <button type="button" id="btnBorderPlus" style="width: 28px; height: 28px; padding: 0; flex-shrink: 0; font-size: 1.1rem; line-height: 1; border-radius: 4px; background: #eee; color: #333; cursor: pointer;">+</button>
+                    <span id="valBorder" style="font-family: monospace; font-size: 0.9rem; min-width: 20px; text-align: right;">0</span>
+                </div>      
+            </div>
+            
+            <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+                <label title="※アニメーションは2コマ目から開始されます。（Slack等のサムネイルで元の絵文字を綺麗に表示させたい場合に便利です）" style="font-weight: normal; cursor: pointer; display: flex; align-items: center; gap: 6px; margin: 0; font-size: 0.85rem; background: #fff; padding: 6px 12px; border: 1px solid #ccc; border-radius: 6px;">
+                    <input type="checkbox" id="firstFrameOriginal" checked style="width: auto; margin: 0; padding: 0;">
+                    <strong>1コマ目を元画像にする</strong>
+                </label>
+                <button id="btnPlay" class="btn-play" style="width: auto; padding: 0.5rem 1rem; margin: 0;">
+                    ▶ 全てを最初から再生
+                </button>
+                <button id="btnRemoveAll" class="btn-danger" style="width: auto; padding: 0.5rem 1rem; margin: 0;" disabled>
+                    🗑️ 一括削除
+                </button>
+
+                         
+            </div>
+        </div>
+        
+        <div id="previewGrid" class="preview-grid bg-mode-checker">
+            <div style="grid-column: 1 / -1; text-align: center; color: #888; padding: 3rem 1rem; border: 2px dashed #ddd; border-radius: 8px;">
+                左側のパネルから画像をアップロードしてください。<br>アップロードされた画像は一括で同じ設定が適用されます。
+            </div>
+        </div>
+    </div>
+
+    <div id="statusMsg" class="status-msg"></div>
+
+<script>
+// --- 状態管理 ---
+let images = [];
+let previewStartTime = performance.now();
+let isPlaying = false; 
+let calculationId = 0; // バックグラウンドの計算制御用
+
+// --- DOM要素 ---
+const dropZone = document.getElementById('mainDropZone');
+const fileUpload = document.getElementById('fileUpload');
+const previewGrid = document.getElementById('previewGrid');
+const btnPlay = document.getElementById('btnPlay');
+const btnRemoveAll = document.getElementById('btnRemoveAll');
+const btnDownloadAll = document.getElementById('btnDownloadAll');
+const btnDownloadAllIndividual = document.getElementById('btnDownloadAllIndividual');
+const btnCalculateSize = document.getElementById('btnCalculateSize');
+const btnOptimizeAll = document.getElementById('btnOptimizeAll');
+const statusMsg = document.getElementById('statusMsg');
+
+// 設定項目
+const elAnimType = document.getElementById('animType');
+const elAnimType2 = document.getElementById('animType2'); 
+
+// 変化の大きさ（メイン用）
+const elAmplitude1 = document.getElementById('amplitude1');
+const elValAmp1 = document.getElementById('valAmp1');
+const btnAmpMinus1 = document.getElementById('btnAmpMinus1');
+const btnAmpPlus1 = document.getElementById('btnAmpPlus1');
+
+// 変化の大きさ（サブ用）
+const elAmplitude2 = document.getElementById('amplitude2');
+const elValAmp2 = document.getElementById('valAmp2');
+const btnAmpMinus2 = document.getElementById('btnAmpMinus2');
+const btnAmpPlus2 = document.getElementById('btnAmpPlus2');
+
+// 白フチ用の設定項目
+const elBorderWidth = document.getElementById('borderWidth');
+const elValBorder = document.getElementById('valBorder');
+const btnBorderMinus = document.getElementById('btnBorderMinus');
+const btnBorderPlus = document.getElementById('btnBorderPlus');
+
+const elFps = document.getElementById('fps');
+const elDurationSec = document.getElementById('durationSec');
+const elLoopCount = document.getElementById('loopCount');
+const elFirstFrameOriginal = document.getElementById('firstFrameOriginal');
+const bgRadios = document.querySelectorAll('input[name="bgColor"]');
+const imageTypeRadios = document.querySelectorAll('input[name="imageType"]');
+
+// --- バイナリ操作とCRC32計算用関数 ---
+const crcTable = [];
+for (let i = 0; i < 256; i++) {
+    let c = i;
+    for (let k = 0; k < 8; k++) {
+        c = ((c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1));
+    }
+    crcTable[i] = c;
+}
+
+function crc32(uint8Arr) {
+    let crc = 0xFFFFFFFF;
+    for (let i = 0; i < uint8Arr.length; i++) {
+        crc = (crc >>> 8) ^ crcTable[(crc ^ uint8Arr[i]) & 0xFF];
+    }
+    return (crc ^ 0xFFFFFFFF) >>> 0;
+}
+
+function setApngLoopCount(buffer, loopCount) {
+    const view = new DataView(buffer);
+    const length = view.byteLength;
+    let offset = 8;
+    
+    while (offset < length) {
+        const chunkLength = view.getUint32(offset);
+        const chunkType = String.fromCharCode(
+            view.getUint8(offset + 4), view.getUint8(offset + 5),
+            view.getUint8(offset + 6), view.getUint8(offset + 7)
+        );
+        
+        if (chunkType === 'acTL') {
+            view.setUint32(offset + 12, loopCount);
+            const crcData = new Uint8Array(buffer, offset + 4, 4 + chunkLength);
+            const crc = crc32(crcData);
+            view.setUint32(offset + 8 + chunkLength, crc);
+            break;
+        }
+        offset += 12 + chunkLength;
+    }
+    return buffer;
+}
+
+// --- イベントリスナー ---
+
+// 背景色切り替え
+bgRadios.forEach(radio => {
+    radio.addEventListener('change', (e) => {
+        previewGrid.className = 'preview-grid bg-mode-' + e.target.value;
+    });
+});
+
+// ファイルドロップ・選択
+dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('dragover'); });
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+dropZone.addEventListener('drop', (e) => {
+    e.preventDefault(); dropZone.classList.remove('dragover');
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) handleFiles(e.dataTransfer.files);
+});
+dropZone.addEventListener('click', () => fileUpload.click());
+fileUpload.addEventListener('change', (e) => {
+    if (e.target.files && e.target.files.length > 0) handleFiles(e.target.files);
+    e.target.value = '';
+});
+
+// 容量制限（絵文字かそれ以外か）の変更 -> UIだけ更新
+imageTypeRadios.forEach(radio => {
+    radio.addEventListener('change', () => {
+        images.forEach(imgObj => updateItemUI(imgObj));
+    });
+});
+
+// スライダーとボタンの同期 (メインの変化の大きさ)
+elAmplitude1.addEventListener('input', () => { 
+    elValAmp1.innerText = elAmplitude1.value; 
+    restartPreview(); 
+});
+elAmplitude1.addEventListener('change', () => {
+    resetSizeInfo();
+});
+btnAmpMinus1.addEventListener('click', () => {
+    let val = parseInt(elAmplitude1.value, 10);
+    if (val > parseInt(elAmplitude1.min, 10)) {
+        elAmplitude1.value = val - 1;
+        elValAmp1.innerText = elAmplitude1.value;
+        restartPreview();
+        resetSizeInfo();
+    }
+});
+btnAmpPlus1.addEventListener('click', () => {
+    let val = parseInt(elAmplitude1.value, 10);
+    if (val < parseInt(elAmplitude1.max, 10)) {
+        elAmplitude1.value = val + 1;
+        elValAmp1.innerText = elAmplitude1.value;
+        restartPreview();
+        resetSizeInfo();
+    }
+});
+
+// スライダーとボタンの同期 (サブの変化の大きさ)
+elAmplitude2.addEventListener('input', () => { 
+    elValAmp2.innerText = elAmplitude2.value; 
+    restartPreview(); 
+});
+elAmplitude2.addEventListener('change', () => {
+    resetSizeInfo();
+});
+btnAmpMinus2.addEventListener('click', () => {
+    let val = parseInt(elAmplitude2.value, 10);
+    if (val > parseInt(elAmplitude2.min, 10)) {
+        elAmplitude2.value = val - 1;
+        elValAmp2.innerText = elAmplitude2.value;
+        restartPreview();
+        resetSizeInfo();
+    }
+});
+btnAmpPlus2.addEventListener('click', () => {
+    let val = parseInt(elAmplitude2.value, 10);
+    if (val < parseInt(elAmplitude2.max, 10)) {
+        elAmplitude2.value = val + 1;
+        elValAmp2.innerText = elAmplitude2.value;
+        restartPreview();
+        resetSizeInfo();
+    }
+});
+
+
+// スライダーとボタンの同期 (白フチの太さ)
+elBorderWidth.addEventListener('input', () => { 
+    elValBorder.innerText = elBorderWidth.value; 
+});
+elBorderWidth.addEventListener('change', () => {
+    updateBorderedImages();
+    restartPreview();
+    resetSizeInfo();
+});
+btnBorderMinus.addEventListener('click', () => {
+    let val = parseInt(elBorderWidth.value, 10);
+    if (val > parseInt(elBorderWidth.min, 10)) {
+        elBorderWidth.value = val - 1;
+        elValBorder.innerText = elBorderWidth.value;
+        updateBorderedImages();
+        restartPreview();
+        resetSizeInfo();
+    }
+});
+btnBorderPlus.addEventListener('click', () => {
+    let val = parseInt(elBorderWidth.value, 10);
+    if (val < parseInt(elBorderWidth.max, 10)) {
+        elBorderWidth.value = val + 1;
+        elValBorder.innerText = elBorderWidth.value;
+        updateBorderedImages();
+        restartPreview();
+        resetSizeInfo();
+    }
+});
+
+// 秒数が変更されたときに、自動でループ回数を切り替える処理
+elDurationSec.addEventListener('change', (e) => {
+    const duration = e.target.value;
+    
+    if (duration === '1') {
+        elLoopCount.value = '3';
+    } else if (duration === '1.5' || duration === '2') {
+        elLoopCount.value = '2';
+    } else if (duration === '3' || duration === '4') {
+        elLoopCount.value = '1';
+    }
+});
+
+// アニメーション設定の変更 -> リセットして未計算状態へ
+[elAnimType, elAnimType2, elFps, elDurationSec, elLoopCount, elFirstFrameOriginal].forEach(el => {
+    el.addEventListener('change', () => {
+        restartPreview();
+        resetSizeInfo();
+    });
+});
+
+// 容量計算ボタン
+btnCalculateSize.addEventListener('click', async () => {
+    const originalText = btnCalculateSize.innerHTML;
+    btnCalculateSize.disabled = true;
+    btnCalculateSize.innerHTML = '⏳ 計算中...';
+    
+    await recalculateAllSizes();
+    
+    btnCalculateSize.innerHTML = originalText;
+    btnCalculateSize.disabled = false;
+});
+
+// 最適化ボタン
+btnOptimizeAll.addEventListener('click', async () => {
+    const limit = document.querySelector('input[name="imageType"]:checked').value === 'emoji' ? 300 * 1024 : 1024 * 1024;
+    // 修正: 既に16色まで最適化してもオーバーしている画像は除外する
+    const overLimitImages = images.filter(img => img.currentSize !== undefined && img.currentSize > limit && img.cnum !== 16);
+    if (overLimitImages.length === 0) return;
+
+    showStatus(`最適化中... 0 / ${overLimitImages.length}`, true);
+    let count = 0;
+    
+    for (const imgObj of overLimitImages) {
+        await optimizeSingle(imgObj, limit);
+        count++;
+        updateStatusProgress(`最適化中... ${count} / ${overLimitImages.length}`, count / overLimitImages.length);
+    }
+    
+    hideStatus();
+});
+
+// 一括削除ボタン
+btnRemoveAll.addEventListener('click', () => {
+    if (confirm('すべての画像を削除しますか？')) {
+        images = [];
+        updatePreviewUI();
+        btnRemoveAll.disabled = true;
+        btnDownloadAll.disabled = true;
+        btnDownloadAllIndividual.disabled = true;
+        btnOptimizeAll.disabled = true;
+        calculationId++; // 計算キャンセル
+    }
+});
+
+// 一括出力ボタン（ZIP）
+btnDownloadAll.addEventListener('click', async () => {
+    if (images.length === 0) return;
+    showStatus('ZIP作成中...<br>画像生成には時間がかかります', true);
+    
+    try {
+        const zip = new JSZip();
+        let currentCount = 0;
+        
+        for (const imgObj of images) {
+            if (!imgObj.currentBlob) {
+                imgObj.currentBlob = await generateApngBlob(imgObj, getParams(), imgObj.cnum);
+                imgObj.currentSize = imgObj.currentBlob.size;
+                updateItemUI(imgObj);
+            }
+            
+            let fileName = imgObj.name;
+            if (fileName.toLowerCase().endsWith('.png')) {
+                fileName = fileName.substring(0, fileName.length - 4);
+            }
+            
+            const arrayBuffer = await imgObj.currentBlob.arrayBuffer();
+            zip.file(`${fileName}.png`, arrayBuffer);
+            
+            currentCount++;
+            updateStatusProgress(`ZIP作成中... ${currentCount} / ${images.length}`, currentCount / images.length);
+            await yieldToMain();
+        }
+        
+        const zipContent = await zip.generateAsync({type: "blob"});
+        const url = URL.createObjectURL(zipContent);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `apng_files_${new Date().getTime()}.zip`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    } catch (e) {
+        console.error(e);
+        alert('ZIPの作成中にエラーが発生しました。');
+    }
+    
+    hideStatus();
+});
+
+// 一括出力ボタン（個別）
+btnDownloadAllIndividual.addEventListener('click', async () => {
+    if (images.length === 0) return;
+    
+    const confirmed = confirm('複数のファイルを個別にダウンロードします。\n※ブラウザの設定によっては、最初の1ファイル以外がブロックされることがあります。\nその場合は、アドレスバーの右側に表示されるブロック通知から許可を出してください。\n\nよろしいですか？');
+    if (!confirmed) return;
+
+    showStatus('ダウンロード準備中...', true);
+    
+    try {
+        let currentCount = 0;
+        for (const imgObj of images) {
+            if (!imgObj.currentBlob) {
+                imgObj.currentBlob = await generateApngBlob(imgObj, getParams(), imgObj.cnum);
+                imgObj.currentSize = imgObj.currentBlob.size;
+                updateItemUI(imgObj);
+            }
+            
+            let fileName = imgObj.name;
+            if (fileName.toLowerCase().endsWith('.png')) {
+                fileName = fileName.substring(0, fileName.length - 4);
+            }
+            
+            const url = URL.createObjectURL(imgObj.currentBlob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `${fileName}.png`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            
+            currentCount++;
+            updateStatusProgress(`ダウンロード処理中... ${currentCount} / ${images.length}`, currentCount / images.length);
+            
+            await new Promise(resolve => setTimeout(resolve, 500));
+        }
+    } catch (e) {
+        console.error(e);
+        alert('ダウンロード処理中にエラーが発生しました。');
+    }
+    
+    hideStatus();
+});
+
+// 再生ボタン
+btnPlay.addEventListener('click', () => {
+    if (images.length > 0) restartPreview();
+});
+
+// --- UI制御関数 ---
+function resetSizeInfo() {
+    calculationId++; // 実行中の計算をキャンセル
+    images.forEach(imgObj => {
+        imgObj.currentSize = undefined;
+        imgObj.currentBlob = undefined;
+        updateItemUI(imgObj);
+    });
+}
+
+function showStatus(html, withProgress = false) {
+    statusMsg.innerHTML = html;
+    if (withProgress) {
+        statusMsg.innerHTML += `
+            <div class="progress-wrap">
+                <div class="progress-track">
+                    <div class="progress-bar" id="statusBar"></div>
+                </div>
+                <div class="progress-detail" id="statusDetail">準備中...</div>
+            </div>
+        `;
+    }
+    statusMsg.classList.add('active');
+}
+function updateStatusProgress(text, ratio) {
+    const detail = document.getElementById('statusDetail');
+    const bar = document.getElementById('statusBar');
+    if (detail) detail.innerText = text;
+    if (bar) bar.style.width = `${Math.min(100, Math.max(0, ratio * 100))}%`;
+}
+function hideStatus() {
+    statusMsg.classList.remove('active');
+}
+
+function yieldToMain() {
+    return new Promise(resolve => setTimeout(resolve, 0));
+}
+
+// ファイル読み込み
+function handleFiles(files) {
+    const filesArray = Array.from(files).filter(f => f.type === 'image/png');
+    if (filesArray.length === 0) return;
+    
+    showStatus('画像を読み込んでいます...');
+    
+    let loadedCount = 0;
+    filesArray.forEach(file => {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            const img = new Image();
+            img.onload = () => {
+                const imgObj = {
+                    id: Date.now() + Math.random().toString(36).substr(2, 9),
+                    file: file,
+                    name: file.name,
+                    img: img,
+                    borderedImg: img, // 白フチ処理後の画像を保持（初期値は元画像）
+                    cnum: 0,
+                    currentBlob: undefined,
+                    currentSize: undefined
+                };
+                images.push(imgObj);
+                loadedCount++;
+                if (loadedCount === filesArray.length) {
+                    // 全画像の読み込みが完了したら、白フチ処理を適用してプレビューを表示
+                    updateBorderedImages();
+                    updatePreviewUI();
+                    restartPreview();
+                    resetSizeInfo();
+                    hideStatus();
+                }
+            };
+            img.src = e.target.result;
+        };
+        reader.readAsDataURL(file);
+    });
+}
+
+// --- 白フチを生成する処理 ---
+function createBorderedImage(img, thickness) {
+    const canvas = document.createElement('canvas');
+    const w = img.width + thickness * 2;
+    const h = img.height + thickness * 2;
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    
+    // 16方向に少しずつずらして画像を描画し、太いシルエット（ベース）を作ります
+    const steps = 16;
+    for (let i = 0; i < steps; i++) {
+        const angle = (i * 2 * Math.PI) / steps;
+        const dx = Math.cos(angle) * thickness;
+        const dy = Math.sin(angle) * thickness;
+        ctx.drawImage(img, thickness + dx, thickness + dy, img.width, img.height);
+    }
+    
+    // 描画したシルエットをすべて真っ白に塗りつぶします
+    ctx.globalCompositeOperation = 'source-in';
+    ctx.fillStyle = 'white';
+    ctx.fillRect(0, 0, w, h);
+    
+    // その上に、元の画像を中央に重ねて描画します
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.drawImage(img, thickness, thickness, img.width, img.height);
+    
+    return canvas;
+}
+
+// 読み込まれているすべての画像に対して、設定された太さの白フチを適用します
+function updateBorderedImages() {
+    const thickness = parseInt(elBorderWidth.value, 10);
+    images.forEach(imgObj => {
+        if (thickness === 0) {
+            imgObj.borderedImg = imgObj.img;
+        } else {
+            imgObj.borderedImg = createBorderedImage(imgObj.img, thickness);
+        }
+        
+        // プレビュー用のキャンバスのサイズも、白フチを含めた大きさに更新します
+        if (imgObj.canvas) {
+            imgObj.canvas.width = imgObj.borderedImg.width;
+            imgObj.canvas.height = imgObj.borderedImg.height;
+        }
+    });
+}
+
+function updatePreviewUI() {
+    if (images.length === 0) {
+        previewGrid.innerHTML = `
+            <div style="grid-column: 1 / -1; text-align: center; color: #888; padding: 3rem 1rem; border: 2px dashed #ddd; border-radius: 8px;">
+                左側のパネルから画像をアップロードしてください。<br>アップロードされた画像は一括で同じ設定が適用されます。
+            </div>
+        `;
+        btnRemoveAll.disabled = true;
+        btnDownloadAll.disabled = true;
+        btnDownloadAllIndividual.disabled = true;
+        btnOptimizeAll.disabled = true;
+        return;
+    }
+    
+    btnRemoveAll.disabled = false;
+    btnDownloadAll.disabled = false;
+    btnDownloadAllIndividual.disabled = false;
+    previewGrid.innerHTML = '';
+    
+    images.forEach(imgObj => {
+        const item = document.createElement('div');
+        item.className = 'preview-item';
+        item.id = `preview-item-${imgObj.id}`;
+        
+        const canvas = document.createElement('canvas');
+        // 白フチを含むサイズに合わせる
+        canvas.width = imgObj.borderedImg.width;
+        canvas.height = imgObj.borderedImg.height;
+        imgObj.canvas = canvas;
+        item.appendChild(canvas);
+        
+        const nameNode = document.createElement('p');
+        nameNode.innerText = imgObj.name;
+        nameNode.title = imgObj.name;
+        item.appendChild(nameNode);
+        
+        const btnRemove = document.createElement('button');
+        btnRemove.className = 'btn-remove';
+        btnRemove.innerHTML = '✕';
+        btnRemove.onclick = () => {
+            images = images.filter(i => i.id !== imgObj.id);
+            updatePreviewUI();
+        };
+        item.appendChild(btnRemove);
+        
+        const sizeInfo = document.createElement('div');
+        sizeInfo.className = 'size-info';
+        sizeInfo.innerText = '未計算';
+        item.appendChild(sizeInfo);
+
+        // --- 追加：最適化限界のメッセージ用 ---
+        const limitAlert = document.createElement('div');
+        limitAlert.className = 'limit-alert';
+        item.appendChild(limitAlert);
+        // ------------------------------------
+
+        const btnCalc = document.createElement('button');
+        btnCalc.className = 'btn-calc-single';
+        btnCalc.innerHTML = '📊 個別に計算';
+        btnCalc.onclick = async () => {
+            btnCalc.disabled = true;
+            const originalText = btnCalc.innerHTML;
+            btnCalc.innerHTML = '⏳ 計算中...';
+            sizeInfo.innerText = "⏳ 計算中...";
+            
+            imgObj.cnum = 0; 
+            imgObj.currentSize = undefined;
+            imgObj.currentBlob = undefined;
+            
+            try {
+                const p = getParams();
+                const blob = await generateApngBlob(imgObj, p, imgObj.cnum);
+                imgObj.currentBlob = blob;
+                imgObj.currentSize = blob.size;
+                updateItemUI(imgObj);
+            } catch (e) {
+                console.error(e);
+                sizeInfo.innerText = "エラー";
+            }
+            
+            btnCalc.innerHTML = originalText;
+            btnCalc.disabled = false;
+        };
+        item.appendChild(btnCalc);
+
+        const btnDl = document.createElement('button');
+        btnDl.className = 'btn-dl-single';
+        btnDl.innerText = '⬇ 個別保存';
+        btnDl.onclick = async () => {
+            btnDl.disabled = true;
+            btnDl.innerText = '生成中...';
+            
+            if (!imgObj.currentBlob) {
+                imgObj.currentBlob = await generateApngBlob(imgObj, getParams(), imgObj.cnum);
+                imgObj.currentSize = imgObj.currentBlob.size;
+                updateItemUI(imgObj);
+            }
+            
+            let fileName = imgObj.name;
+            if (fileName.toLowerCase().endsWith('.png')) {
+                fileName = fileName.substring(0, fileName.length - 4);
+            }
+            
+            const url = URL.createObjectURL(imgObj.currentBlob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `${fileName}.png`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            
+            btnDl.innerText = '⬇ 個別保存';
+            btnDl.disabled = false;
+        };
+        item.appendChild(btnDl);
+        
+        const btnOpt = document.createElement('button');
+        btnOpt.className = 'btn-optimize';
+        btnOpt.innerHTML = '⚡ 最適化';
+        btnOpt.style.display = 'none';
+        btnOpt.onclick = async () => {
+            btnOpt.disabled = true;
+            const originalText = btnOpt.innerHTML;
+            btnOpt.innerHTML = '処理中...';
+            
+            const limit = document.querySelector('input[name="imageType"]:checked').value === 'emoji' ? 300 * 1024 : 1024 * 1024;
+            await optimizeSingle(imgObj, limit);
+            
+            btnOpt.innerHTML = originalText;
+            btnOpt.disabled = false;
+        };
+        item.appendChild(btnOpt);
+        
+        previewGrid.appendChild(item);
+    });
+}
+
+function restartPreview() {
+    previewStartTime = performance.now();
+    if (!isPlaying) {
+        isPlaying = true;
+        requestAnimationFrame(renderLoop);
+    }
+}
+
+function getParams() {
+    return {
+        type: elAnimType.value,
+        type2: elAnimType2.value,
+        fps: parseInt(elFps.value, 10),
+        durationSec: parseFloat(elDurationSec.value),
+        loopCount: parseInt(elLoopCount.value, 10),
+        amplitude1: parseFloat(elAmplitude1.value) / 100, // メイン用
+        amplitude2: parseFloat(elAmplitude2.value) / 100, // サブ用
+        firstFrameOriginal: elFirstFrameOriginal.checked 
+    };
+}
+
+// 描画ループ
+function renderLoop(time) {
+    if (images.length === 0) {
+        isPlaying = false;
+        return;
+    }
+    
+    const p = getParams();
+    const durationMs = p.durationSec * 1000;
+    const totalDurationMs = durationMs * p.loopCount;
+    const elapsed = time - previewStartTime;
+    
+    if (elapsed > totalDurationMs) {
+        images.forEach(imgObj => {
+            if (imgObj.canvas) {
+                const ctx = imgObj.canvas.getContext('2d');
+                ctx.clearRect(0, 0, imgObj.canvas.width, imgObj.canvas.height);
+                // フチ付きの画像を描画に使用します
+                drawFrame(ctx, imgObj.borderedImg, imgObj.borderedImg.width, imgObj.borderedImg.height, p, 1.0);
+            }
+        });
+        isPlaying = false;
+        return;
+    }
+
+    const frameIntervalMs = 1000 / p.fps;
+    const currentFrameIndex = Math.floor(elapsed / frameIntervalMs);
+    const totalFrames = Math.floor(p.durationSec * p.fps);
+    
+    let frameInLoop = currentFrameIndex % totalFrames;
+    let t;
+    let isFirstFrame = false;
+
+    if (p.firstFrameOriginal) {
+        if (frameInLoop === 0) {
+            isFirstFrame = true;
+            t = 0;
+        } else {
+            t = (frameInLoop - 1) / (totalFrames - 1);
+        }
+    } else {
+        t = frameInLoop / totalFrames;
+    }
+
+    if (elapsed >= totalDurationMs - frameIntervalMs) {
+        t = 1.0;
+        isFirstFrame = false;
+    }
+
+    images.forEach(imgObj => {
+        if (imgObj.canvas) {
+            const ctx = imgObj.canvas.getContext('2d');
+            ctx.clearRect(0, 0, imgObj.canvas.width, imgObj.canvas.height);
+            // フチ付きの画像を描画に使用します
+            drawFrame(ctx, imgObj.borderedImg, imgObj.borderedImg.width, imgObj.borderedImg.height, p, t, isFirstFrame);
+        }
+    });
+    
+    requestAnimationFrame(renderLoop);
+}
+
+// --- 1フレームの描画ロジック ---
+function drawFrame(ctx, img, w, h, p, t, isFirstFrame = false) {
+    ctx.save();
+    
+    const cx = w / 2;
+    const cy = h / 2;
+    ctx.translate(cx, cy);
+
+    if (isFirstFrame) {
+        ctx.globalAlpha = 1.0;
+        ctx.drawImage(img, -w/2, -h/2, w, h);
+        ctx.restore();
+        return;
+    }
+
+    // イージング関数（スムーズな動きの計算）
+    const easeOutElastic = x => x === 0 ? 0 : x === 1 ? 1 : Math.pow(2, -10 * x) * Math.sin((x * 10 - 0.75) * ((2 * Math.PI) / 3)) + 1;
+    const easeInOutSine = x => -(Math.cos(Math.PI * x) - 1) / 2;
+    const easeOutCubic = x => 1 - Math.pow(1 - x, 3);
+    const easeOutBounce = x => {
+        const n1 = 7.5625; const d1 = 2.75;
+        if (x < 1 / d1) return n1 * x * x;
+        if (x < 2 / d1) return n1 * (x -= 1.5 / d1) * x + 0.75;
+        if (x < 2.5 / d1) return n1 * (x -= 2.25 / d1) * x + 0.9375;
+        return n1 * (x -= 2.625 / d1) * x + 0.984375;
+    };
+
+    let dx = 0, dy = 0, scaleX = 1, scaleY = 1, rot = 0, alpha = 1;
+    let pivotX = 0, pivotY = 0; // 回転などの支点オフセット
+    
+    const applyType = (type, amp) => {
+        // 移動距離の計算
+        const moveDistX = w * (0.8 + amp * 1.2);
+        const moveDistY = h * (0.8 + amp * 1.2);
+        
+        let pT, eT;
+        switch (type) {
+            case 'ゆらゆら（上部支点）':
+                pivotY = -h / 2; // 画像の上端を支点にする
+                rot += Math.sin(t * Math.PI * 2) * (0.3 * amp);
+                break;
+            case 'ゆらゆら（中部支点）':
+                pivotY = 0; // 画像の中央を支点にする
+                rot += Math.sin(t * Math.PI * 2) * (0.3 * amp);
+                break;
+            case 'ゆらゆら（下部支点）':
+                pivotY = h / 2; // 画像の下端を支点にする
+                rot += Math.sin(t * Math.PI * 2) * (0.3 * amp);
+                break;
+            case '横揺れ':
+                dx += Math.sin(t * Math.PI * 2 * 2) * (w * 0.15 * amp);
+                break;
+            case '縦揺れ':
+                dy += Math.sin(t * Math.PI * 2 * 2) * (h * 0.15 * amp);
+                break;
+            case '拡大⇔縮小':
+                pT = Math.sin(t * Math.PI * 2);
+                scaleX *= 1 + pT * (0.2 * amp);
+                scaleY *= 1 + pT * (0.2 * amp);
+                break;
+            case '膨らんでしぼむ':
+                pT = Math.sin(t * Math.PI * 2);
+                scaleX *= 1 + pT * (0.25 * amp);
+                scaleY *= 1 + pT * (0.25 * amp);
+                break;
+            case '拡大で登場':
+                eT = easeOutElastic(t);
+                scaleX *= eT;
+                scaleY *= eT;
+                break;
+            case 'ぐるぐるで登場（回転＋拡大）':
+                eT = easeOutElastic(t);
+                scaleX *= eT;
+                scaleY *= eT;
+                rot += (1 - t) * Math.PI * 2 * amp;
+                break;
+            case 'その場で回転（時計回り）':
+                rot += t * Math.PI * 2 * (amp * 10);
+                break;
+            case 'その場で回転（反時計回り）':
+                rot -= t * Math.PI * 2 * (amp * 10);
+                break;
+            case 'ふんわり消える（フェードアウト）':
+                alpha *= (1 - t);
+                break;
+            case 'ふんわり現れる（フェードイン）':
+                alpha *= 0.1 + 0.9 * t;
+                break;
+           case '上から登場':
+                eT = easeOutCubic(t);
+                dy -= (1 - eT) * (h * 0.9);
+                break;
+            case '上から落ちてきて着地':
+                eT = easeOutBounce(t);
+                dy -= (1 - eT) * (h * 0.9);
+                break;
+           case '下から登場':
+                eT = easeOutCubic(t);
+                dy += (1 - eT) * Math.min(moveDistY, h * 0.9);
+                break;
+                
+            case '右から左へ流れる':
+                dx += (0.5 - t) * (w * 1.05) * 2;
+                break;
+                
+            case '左から右へ流れる':
+                dx -= (0.5 - t) * (w * 1.05) * 2;
+                break;
+                
+            case '右からすべって登場':
+                eT = easeOutCubic(t);
+                dx += (1 - eT) * Math.min(moveDistX, w * 0.9);
+                break;
+                
+            case '左からすべって登場':
+                eT = easeOutCubic(t);
+                dx -= (1 - eT) * Math.min(moveDistX, w * 0.9);
+                break;
+            case 'ガタガタ（激しい震え）':
+                pT = Math.sin(t * Math.PI);
+                dx += (Math.random() - 0.5) * 15 * amp * pT;
+                dy += (Math.random() - 0.5) * 15 * amp * pT;
+                rot += (Math.random() - 0.5) * 0.15 * amp * pT;
+                break;
+            case '震えてピタッと止まる':
+                let shakeAmount = Math.max(0, 1 - t * 1.5) * amp * Math.sin(t * Math.PI);
+                dx += (Math.random() - 0.5) * 20 * shakeAmount;
+                dy += (Math.random() - 0.5) * 20 * shakeAmount;
+                break;
+            case 'ペコリ（左に倒れる）':
+                pT = Math.sin(t * Math.PI * 2);
+                rot -= pT * (0.3 * amp);
+                break;
+            case 'ペコリ（右に倒れる）':
+                pT = Math.sin(t * Math.PI * 2);
+                rot += pT * (0.3 * amp);
+                break;
+            case 'チカチカ（点滅）':
+                alpha *= (Math.floor(t * 10 * amp) % 2 === 0) ? 1 : 0.3;
+                break;
+            case 'ゆっくり伸び縮み':
+                scaleY *= 1 + Math.sin(t * Math.PI * 2) * (0.15 * amp);
+                scaleX *= 1 - Math.sin(t * Math.PI * 2) * (0.08 * amp);
+                break;
+            case '激しく伸び縮み':
+                scaleY *= 1 + Math.sin(t * Math.PI * 2 * 4) * (0.2 * amp);
+                scaleX *= 1 - Math.sin(t * Math.PI * 2 * 4) * (0.08 * amp);
+                break;
+            case 'くるっと反転（横）':
+                scaleX *= Math.cos(t * Math.PI * 2 * Math.max(1, Math.round(amp * 2)));
+                break;
+            case 'くるっと反転（縦）':
+                scaleY *= Math.cos(t * Math.PI * 2 * Math.max(1, Math.round(amp * 2)));
+                break;
+            case 'ぴょんぴょん（ジャンプ＋伸縮）':
+                let stretch = Math.cos(t * Math.PI * 2);
+                scaleX *= 1 + stretch * (0.15 * amp);
+                scaleY *= 1 - stretch * (0.15 * amp);
+                dy -= Math.sin(t * Math.PI) * (h * 0.5 * amp);
+                break;
+            case 'ぽよんっ（バネのような登場）':
+                let poyonT = t === 0 ? 0 : t === 1 ? 1 : Math.pow(2, -8 * t) * Math.sin((t * 10 - 0.75) * ((2 * Math.PI) / 2)) * (0.5 + amp * 0.5) + 1;
+                scaleX *= poyonT;
+                scaleY *= poyonT;
+                break;
+        }
+    };
+
+    applyType(p.type, p.amplitude1);
+    if (p.type2 !== 'none') {
+        applyType(p.type2, p.amplitude2);
+    }
+    
+    ctx.translate(dx, dy);
+    // 支点を考慮した回転とスケール
+    ctx.translate(pivotX, pivotY);
+    ctx.rotate(rot);
+    ctx.scale(scaleX, scaleY);
+    ctx.translate(-pivotX, -pivotY);
+    
+    ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
+    
+    ctx.drawImage(img, -w/2, -h/2, w, h);
+    ctx.restore();
+}
+
+// --- APNG生成と最適化 ---
+
+async function recalculateAllSizes() {
+    const currentId = ++calculationId;
+    
+   for (let imgObj of images) {
+        imgObj.cnum = 0; 
+        imgObj.currentSize = undefined;
+        imgObj.currentBlob = undefined;
+        
+        const item = document.getElementById(`preview-item-${imgObj.id}`);
+        if (item) {
+            const sizeInfo = item.querySelector('.size-info');
+            if (sizeInfo) sizeInfo.innerText = "⏳ 計算中...";
+            item.classList.remove('over-limit');
+            const optimizeBtn = item.querySelector('.btn-optimize');
+            if (optimizeBtn) optimizeBtn.style.display = 'none';
+            const limitAlert = item.querySelector('.limit-alert');
+            if (limitAlert) limitAlert.style.display = 'none';
+            
+            const calcBtn = item.querySelector('.btn-calc-single');
+            if (calcBtn) {
+                calcBtn.style.display = 'block';
+                calcBtn.disabled = true; 
+            }
+        }
+    }
+    for (let imgObj of images) {
+        if (currentId !== calculationId) return;
+        
+        const p = getParams();
+        try {
+            const blob = await generateApngBlob(imgObj, p, imgObj.cnum);
+            if (currentId !== calculationId) return; 
+            if (!images.find(img => img.id === imgObj.id)) continue;
+            
+            imgObj.currentBlob = blob;
+            imgObj.currentSize = blob.size;
+            updateItemUI(imgObj);
+        } catch (e) {
+            console.error(e);
+            const item = document.getElementById(`preview-item-${imgObj.id}`);
+            if (item) {
+                const sizeInfo = item.querySelector('.size-info');
+                if (sizeInfo) sizeInfo.innerText = "エラー";
+            }
+        }
+        await yieldToMain();
+    }
+}
+
+function checkOptimizeAllButton() {
+    const limit = document.querySelector('input[name="imageType"]:checked').value === 'emoji' ? 300 * 1024 : 1024 * 1024;
+    // 修正: 限界まで最適化してもオーバーしている画像(cnum===16)は最適化可能と見なさない
+    const overAndOptimizable = images.some(img => img.currentSize !== undefined && img.currentSize > limit && img.cnum !== 16);
+    btnOptimizeAll.disabled = !overAndOptimizable;
+}
+
+function updateItemUI(imgObj) {
+    const item = document.getElementById(`preview-item-${imgObj.id}`);
+    if (!item) return;
+    
+    const limit = document.querySelector('input[name="imageType"]:checked').value === 'emoji' ? 300 * 1024 : 1024 * 1024;
+    const sizeInfo = item.querySelector('.size-info');
+    const limitAlert = item.querySelector('.limit-alert'); // 追加
+    const optimizeBtn = item.querySelector('.btn-optimize');
+    const calcBtn = item.querySelector('.btn-calc-single'); 
+    
+    if (imgObj.currentSize === undefined) {
+        sizeInfo.innerText = "未計算";
+        item.classList.remove('over-limit');
+        optimizeBtn.style.display = 'none';
+        limitAlert.style.display = 'none'; // 追加
+        
+        if (calcBtn) {
+            calcBtn.style.display = 'block';
+            calcBtn.disabled = false; 
+        }
+        
+    } else {
+        const kb = (imgObj.currentSize / 1024).toFixed(1);
+        sizeInfo.innerText = `サイズ: ${kb} KB`;
+        
+        if (calcBtn) calcBtn.style.display = 'none'; 
+        
+        if (imgObj.currentSize > limit) {
+            item.classList.add('over-limit');
+            
+            // --- 修正: 16色まで減らしてもオーバーしている場合の処理 ---
+            if (imgObj.cnum === 16) {
+                optimizeBtn.style.display = 'none';
+                limitAlert.innerHTML = '限界まで最適化しましたが指定サイズよりオーバーしました。<br>元の画像サイズ(解像度)やフレーム数・秒数を減らしてください。';
+                limitAlert.style.display = 'block';
+            } else {
+                optimizeBtn.style.display = 'block';
+                limitAlert.style.display = 'none';
+            }
+            // ---------------------------------------------------------
+        } else {
+            item.classList.remove('over-limit');
+            optimizeBtn.style.display = 'none';
+            limitAlert.style.display = 'none'; // 追加
+            if (imgObj.cnum > 0) {
+                sizeInfo.innerText += " (最適化済)";
+            }
+        }
+    }
+    
+    checkOptimizeAllButton();
+}
+
+async function optimizeSingle(imgObj, limit) {
+    const p = getParams();
+    const cnums = [256, 220, 180, 150, 120, 90, 70, 50, 30, 16];
+    
+    for (let cnum of cnums) {
+        imgObj.cnum = cnum;
+        try {
+            const blob = await generateApngBlob(imgObj, p, cnum);
+            imgObj.currentBlob = blob;
+            imgObj.currentSize = blob.size;
+            updateItemUI(imgObj);
+            
+            if (blob.size <= limit) {
+                break;
+            }
+        } catch(e) {
+            console.error(e);
+        }
+        await yieldToMain();
+    }
+}
+
+function generateApngBlob(imgObj, p, cnum) {
+    return new Promise((resolve, reject) => {
+        try {
+            const frames = [];
+            const delays = [];
+            const frameCount = Math.floor(p.durationSec * p.fps);
+            const msPerFrame = 1000 / p.fps;
+            
+            // 白フチを含むサイズでキャンバスを作ります
+            const w = imgObj.borderedImg.width;
+            const h = imgObj.borderedImg.height;
+            const canvas = document.createElement('canvas');
+            canvas.width = w;
+            canvas.height = h;
+            const ctx = canvas.getContext('2d', { willReadFrequently: true });
+            
+            for (let i = 0; i < frameCount; i++) {
+                let t;
+                let isFirstFrame = false;
+                
+                if (p.firstFrameOriginal) {
+                    if (i === 0) {
+                        isFirstFrame = true;
+                        t = 0;
+                    } else {
+                        t = (i - 1) / (frameCount - 1);
+                    }
+                } else {
+                    t = i / frameCount;
+                }
+                
+                ctx.clearRect(0, 0, w, h);
+                // 白フチ付きの画像を描画に使用します
+                drawFrame(ctx, imgObj.borderedImg, w, h, p, t, isFirstFrame);
+                
+                const imgData = ctx.getImageData(0, 0, w, h);
+                frames.push(imgData.data.buffer);
+                delays.push(msPerFrame);
+            }
+            
+            setTimeout(() => {
+                try {
+                    let apngArrayBuffer = UPNG.encode(frames, w, h, cnum, delays);
+                    if (p.loopCount !== 0) {
+                        apngArrayBuffer = setApngLoopCount(apngArrayBuffer, p.loopCount);
+                    }
+                    const blob = new Blob([apngArrayBuffer], { type: 'image/apng' });
+                    resolve(blob);
+                } catch(e) {
+                    reject(e);
+                }
+            }, 10);
+            
+        } catch (error) {
+            reject(error);
+        }
+    });
+}
+
+</script>
+</body>
+</html>

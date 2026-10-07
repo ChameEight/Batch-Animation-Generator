@@ -188,6 +188,14 @@
 
         .size-info { margin-top: 4px; font-size: 0.75rem; text-align: center; color: #666; }
 
+        .btn-play-single {
+            background-color: #4CAF50; color: white; border: none; border-radius: 4px;
+            padding: 0.4rem; font-size: 0.75rem; cursor: pointer; width: 100%;
+            margin-top: 6px; font-weight: bold; transition: 0.2s;
+        }
+        .btn-play-single:hover { background-color: #43A047; }
+        .btn-play-single:disabled { background-color: #a5d6a7; cursor: not-allowed; }
+
         .btn-optimize {
             background-color: #ff9800; color: white; border: none; border-radius: 4px;
             padding: 0.35rem; font-size: 0.75rem; cursor: pointer; width: 100%;
@@ -259,7 +267,7 @@
                             <input type="radio" name="imageType" value="emoji" checked> 絵文字 (300KB以下)
                         </label>
                         <label style="font-weight: normal; cursor: pointer; display: flex; align-items: center; gap: 4px;">
-                            <input type="radio" name="imageType" value="other"> それ以外 (1MB以下)
+                            <input type="radio" name="imageType" value="other"> スタンプ (1MB以下)
                         </label>
                     </div>
                     <div class="help-text" style="margin-top: 8px;">※制限を超えると赤く警告され、「最適化」が可能になります。</div>
@@ -463,9 +471,68 @@
     <div id="statusMsg" class="status-msg"></div>
 
 <script>
+// --- ダウンロード・シェア用共通関数 ---
+function fallbackDownload(blob, filename) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+// 1つのファイルをダウンロード（またはモバイルでシェア）する
+async function saveBlob(blob, filename, mimeType = 'image/png') {
+    const file = new File([blob], filename, { type: mimeType });
+    const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+
+    if (isMobile && navigator.canShare && navigator.canShare({ files: [file] })) {
+        try { 
+            await navigator.share({ files: [file], title: filename }); 
+        } catch (err) {
+            console.log("Share canceled or failed", err);
+            // キャンセル(AbortError)以外は通常のダウンロードにフォールバック
+            if (err.name !== 'AbortError') {
+                fallbackDownload(blob, filename);
+            }
+        }
+    } else {
+        fallbackDownload(blob, filename);
+    }
+}
+
+// 複数のファイルを一括でダウンロード（またはモバイルでまとめてシェア）する
+async function saveMultipleBlobs(blobsWithNames) {
+    const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+    
+    // モバイルの場合はShareAPIで複数ファイルを一括送信
+    if (isMobile && navigator.canShare) {
+        const files = blobsWithNames.map(item => new File([item.blob], item.filename, { type: 'image/png' }));
+        if (navigator.canShare({ files: files })) {
+            try { 
+                await navigator.share({ files: files, title: '複数のAPNG画像' }); 
+                return; // シェア成功したら終了
+            } catch (err) {
+                console.log("Share canceled or failed", err);
+                if (err.name === 'AbortError') return; 
+                // キャンセル以外はフォールバックして順次ダウンロードへ
+            }
+        }
+    }
+    
+    // PCの場合、またはモバイルで複数ファイルシェア非対応/失敗の場合は順次ダウンロード
+    for (const item of blobsWithNames) {
+        fallbackDownload(item.blob, item.filename);
+        // PCでの連続ダウンロードがブラウザに弾かれないよう少し待機
+        await new Promise(resolve => setTimeout(resolve, 500));
+    }
+}
+
+
 // --- 状態管理 ---
 let images = [];
-let previewStartTime = performance.now();
 let isPlaying = false; 
 let calculationId = 0; // バックグラウンドの計算制御用
 
@@ -761,14 +828,10 @@ btnDownloadAll.addEventListener('click', async () => {
         }
         
         const zipContent = await zip.generateAsync({type: "blob"});
-        const url = URL.createObjectURL(zipContent);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `apng_files_${new Date().getTime()}.zip`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
+        
+        // 修正：ZIPファイルも saveBlob を経由して保存（モバイルでも対応可能にするため）
+        await saveBlob(zipContent, `apng_files_${new Date().getTime()}.zip`, 'application/zip');
+        
     } catch (e) {
         console.error(e);
         alert('ZIPの作成中にエラーが発生しました。');
@@ -781,13 +844,20 @@ btnDownloadAll.addEventListener('click', async () => {
 btnDownloadAllIndividual.addEventListener('click', async () => {
     if (images.length === 0) return;
     
-    const confirmed = confirm('複数のファイルを個別にダウンロードします。\n※ブラウザの設定によっては、最初の1ファイル以外がブロックされることがあります。\nその場合は、アドレスバーの右側に表示されるブロック通知から許可を出してください。\n\nよろしいですか？');
-    if (!confirmed) return;
+    const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+    
+    // PCなどの場合は連続ダウンロードの警告を出す
+    if (!isMobile) {
+        const confirmed = confirm('複数のファイルを個別にダウンロードします。\n※ブラウザの設定によっては、最初の1ファイル以外がブロックされることがあります。\nその場合は、アドレスバーの右側に表示されるブロック通知から許可を出してください。\n\nよろしいですか？');
+        if (!confirmed) return;
+    }
 
     showStatus('ダウンロード準備中...', true);
     
     try {
         let currentCount = 0;
+        const blobsWithNames = []; // 生成したファイルを一時保存
+        
         for (const imgObj of images) {
             if (!imgObj.currentBlob) {
                 imgObj.currentBlob = await generateApngBlob(imgObj, getParams(), imgObj.cnum);
@@ -800,19 +870,18 @@ btnDownloadAllIndividual.addEventListener('click', async () => {
                 fileName = fileName.substring(0, fileName.length - 4);
             }
             
-            const url = URL.createObjectURL(imgObj.currentBlob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `${fileName}.png`;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
+            // 配列に格納
+            blobsWithNames.push({ blob: imgObj.currentBlob, filename: `${fileName}.png` });
             
             currentCount++;
             updateStatusProgress(`ダウンロード処理中... ${currentCount} / ${images.length}`, currentCount / images.length);
             
-            await new Promise(resolve => setTimeout(resolve, 500));
+            await yieldToMain();
         }
+        
+        // 生成完了後、一括でシェアまたはダウンロード処理
+        await saveMultipleBlobs(blobsWithNames);
+        
     } catch (e) {
         console.error(e);
         alert('ダウンロード処理中にエラーが発生しました。');
@@ -885,7 +954,9 @@ function handleFiles(files) {
                     borderedImg: img, // 白フチ処理後の画像を保持（初期値は元画像）
                     cnum: 0,
                     currentBlob: undefined,
-                    currentSize: undefined
+                    currentSize: undefined,
+                    startTime: 0, // 個別再生用の時間管理
+                    isPlaying: false // 個別再生フラグ
                 };
                 images.push(imgObj);
                 loadedCount++;
@@ -997,16 +1068,23 @@ function updatePreviewUI() {
         };
         item.appendChild(btnRemove);
         
+        // 個別再生ボタン
+        const btnPlaySingle = document.createElement('button');
+        btnPlaySingle.className = 'btn-play-single';
+        btnPlaySingle.innerHTML = '▶ 個別再生';
+        btnPlaySingle.onclick = () => {
+            playSingle(imgObj);
+        };
+        item.appendChild(btnPlaySingle);
+
         const sizeInfo = document.createElement('div');
         sizeInfo.className = 'size-info';
         sizeInfo.innerText = '未計算';
         item.appendChild(sizeInfo);
 
-        // --- 追加：最適化限界のメッセージ用 ---
         const limitAlert = document.createElement('div');
         limitAlert.className = 'limit-alert';
         item.appendChild(limitAlert);
-        // ------------------------------------
 
         const btnCalc = document.createElement('button');
         btnCalc.className = 'btn-calc-single';
@@ -1055,13 +1133,8 @@ function updatePreviewUI() {
                 fileName = fileName.substring(0, fileName.length - 4);
             }
             
-            const url = URL.createObjectURL(imgObj.currentBlob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `${fileName}.png`;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
+            // 修正：モバイルのシェアAPIに対応した保存処理を使用
+            await saveBlob(imgObj.currentBlob, `${fileName}.png`, 'image/png');
             
             btnDl.innerText = '⬇ 個別保存';
             btnDl.disabled = false;
@@ -1089,8 +1162,23 @@ function updatePreviewUI() {
     });
 }
 
+// プレビューの一括再生
 function restartPreview() {
-    previewStartTime = performance.now();
+    const now = performance.now();
+    images.forEach(img => {
+        img.startTime = now;
+        img.isPlaying = true;
+    });
+    if (!isPlaying) {
+        isPlaying = true;
+        requestAnimationFrame(renderLoop);
+    }
+}
+
+// 個別再生
+function playSingle(imgObj) {
+    imgObj.startTime = performance.now();
+    imgObj.isPlaying = true;
     if (!isPlaying) {
         isPlaying = true;
         requestAnimationFrame(renderLoop);
@@ -1120,55 +1208,63 @@ function renderLoop(time) {
     const p = getParams();
     const durationMs = p.durationSec * 1000;
     const totalDurationMs = durationMs * p.loopCount;
-    const elapsed = time - previewStartTime;
     
-    if (elapsed > totalDurationMs) {
-        images.forEach(imgObj => {
-            if (imgObj.canvas) {
-                const ctx = imgObj.canvas.getContext('2d');
-                ctx.clearRect(0, 0, imgObj.canvas.width, imgObj.canvas.height);
-                // フチ付きの画像を描画に使用します
-                drawFrame(ctx, imgObj.borderedImg, imgObj.borderedImg.width, imgObj.borderedImg.height, p, 1.0);
-            }
-        });
-        isPlaying = false;
-        return;
-    }
-
-    const frameIntervalMs = 1000 / p.fps;
-    const currentFrameIndex = Math.floor(elapsed / frameIntervalMs);
-    const totalFrames = Math.floor(p.durationSec * p.fps);
-    
-    let frameInLoop = currentFrameIndex % totalFrames;
-    let t;
-    let isFirstFrame = false;
-
-    if (p.firstFrameOriginal) {
-        if (frameInLoop === 0) {
-            isFirstFrame = true;
-            t = 0;
-        } else {
-            t = (frameInLoop - 1) / (totalFrames - 1);
-        }
-    } else {
-        t = frameInLoop / totalFrames;
-    }
-
-    if (elapsed >= totalDurationMs - frameIntervalMs) {
-        t = 1.0;
-        isFirstFrame = false;
-    }
+    let anyPlaying = false;
 
     images.forEach(imgObj => {
-        if (imgObj.canvas) {
-            const ctx = imgObj.canvas.getContext('2d');
-            ctx.clearRect(0, 0, imgObj.canvas.width, imgObj.canvas.height);
-            // フチ付きの画像を描画に使用します
-            drawFrame(ctx, imgObj.borderedImg, imgObj.borderedImg.width, imgObj.borderedImg.height, p, t, isFirstFrame);
+        if (!imgObj.canvas) return;
+        
+        const ctx = imgObj.canvas.getContext('2d');
+
+        if (!imgObj.isPlaying) {
+            return;
         }
+
+        anyPlaying = true;
+        const elapsed = time - imgObj.startTime;
+        
+        if (elapsed > totalDurationMs) {
+            imgObj.isPlaying = false;
+            ctx.clearRect(0, 0, imgObj.canvas.width, imgObj.canvas.height);
+            // 最後のフレームを描画して停止
+            drawFrame(ctx, imgObj.borderedImg, imgObj.borderedImg.width, imgObj.borderedImg.height, p, 1.0);
+            return;
+        }
+
+        const frameIntervalMs = 1000 / p.fps;
+        const currentFrameIndex = Math.floor(elapsed / frameIntervalMs);
+        const totalFrames = Math.floor(p.durationSec * p.fps);
+        
+        let frameInLoop = currentFrameIndex % totalFrames;
+        let t;
+        let isFirstFrame = false;
+
+        if (p.firstFrameOriginal) {
+            if (frameInLoop === 0) {
+                isFirstFrame = true;
+                t = 0;
+            } else {
+                t = (frameInLoop - 1) / (totalFrames - 1);
+            }
+        } else {
+            t = frameInLoop / totalFrames;
+        }
+
+        if (elapsed >= totalDurationMs - frameIntervalMs) {
+            t = 1.0;
+            isFirstFrame = false;
+        }
+
+        ctx.clearRect(0, 0, imgObj.canvas.width, imgObj.canvas.height);
+        // フチ付きの画像を描画に使用します
+        drawFrame(ctx, imgObj.borderedImg, imgObj.borderedImg.width, imgObj.borderedImg.height, p, t, isFirstFrame);
     });
     
-    requestAnimationFrame(renderLoop);
+    if (anyPlaying) {
+        requestAnimationFrame(renderLoop);
+    } else {
+        isPlaying = false;
+    }
 }
 
 // --- 1フレームの描画ロジック ---
@@ -1410,7 +1506,7 @@ async function recalculateAllSizes() {
 
 function checkOptimizeAllButton() {
     const limit = document.querySelector('input[name="imageType"]:checked').value === 'emoji' ? 300 * 1024 : 1024 * 1024;
-    // 修正: 限界まで最適化してもオーバーしている画像(cnum===16)は最適化可能と見なさない
+    // 限界まで最適化してもオーバーしている画像(cnum===16)は最適化可能と見なさない
     const overAndOptimizable = images.some(img => img.currentSize !== undefined && img.currentSize > limit && img.cnum !== 16);
     btnOptimizeAll.disabled = !overAndOptimizable;
 }
@@ -1421,7 +1517,7 @@ function updateItemUI(imgObj) {
     
     const limit = document.querySelector('input[name="imageType"]:checked').value === 'emoji' ? 300 * 1024 : 1024 * 1024;
     const sizeInfo = item.querySelector('.size-info');
-    const limitAlert = item.querySelector('.limit-alert'); // 追加
+    const limitAlert = item.querySelector('.limit-alert'); 
     const optimizeBtn = item.querySelector('.btn-optimize');
     const calcBtn = item.querySelector('.btn-calc-single'); 
     
@@ -1429,7 +1525,7 @@ function updateItemUI(imgObj) {
         sizeInfo.innerText = "未計算";
         item.classList.remove('over-limit');
         optimizeBtn.style.display = 'none';
-        limitAlert.style.display = 'none'; // 追加
+        limitAlert.style.display = 'none';
         
         if (calcBtn) {
             calcBtn.style.display = 'block';
@@ -1445,7 +1541,7 @@ function updateItemUI(imgObj) {
         if (imgObj.currentSize > limit) {
             item.classList.add('over-limit');
             
-            // --- 修正: 16色まで減らしてもオーバーしている場合の処理 ---
+            // 16色まで減らしてもオーバーしている場合の処理
             if (imgObj.cnum === 16) {
                 optimizeBtn.style.display = 'none';
                 limitAlert.innerHTML = '限界まで最適化しましたが指定サイズよりオーバーしました。<br>元の画像サイズ(解像度)やフレーム数・秒数を減らしてください。';
@@ -1454,11 +1550,10 @@ function updateItemUI(imgObj) {
                 optimizeBtn.style.display = 'block';
                 limitAlert.style.display = 'none';
             }
-            // ---------------------------------------------------------
         } else {
             item.classList.remove('over-limit');
             optimizeBtn.style.display = 'none';
-            limitAlert.style.display = 'none'; // 追加
+            limitAlert.style.display = 'none';
             if (imgObj.cnum > 0) {
                 sizeInfo.innerText += " (最適化済)";
             }
